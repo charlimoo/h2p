@@ -1,132 +1,128 @@
-# HTML-to-Image Rendering Service
+# HTML to PNG Renderer API
 
-This is a lightweight, high-performance microservice designed for a single purpose: **converting raw HTML into a PNG or JPEG image.**
+A super lightweight Flask API to render high-quality PNG images from either a web URL or a raw HTML string. It leverages a headless browser to ensure accurate rendering of modern HTML, CSS, and JavaScript.
 
-It is a stateless, containerized Flask application that uses a headless Chromium browser via Playwright to ensure high-fidelity rendering of modern HTML, CSS, and even base64-encoded images.
+## Features
 
-### Features
+*   **Render from URL**: Provide a URL and get a PNG screenshot of the page.
+*   **Render from HTML String**: Provide a raw HTML string and get a PNG rendering.
+*   **Custom Dimensions**: Specify the width and height of the output image.
+*   **Handles Complex Content**: Capable of rendering pages with CSS, JavaScript, and even base64 encoded images.
+*   **Lightweight**: Minimal dependencies, relying on a browser already installed on your system.
 
-*   **Stateless by Design:** No database or user state is required. Every request is independent.
-*   **High-Fidelity Rendering:** Uses the powerful Playwright library to render HTML with the Chromium engine, ensuring accurate results.
-*   **Simple JSON API:** A single, easy-to-use endpoint for straightforward integration.
-*   **Customizable Output:** Control the output dimensions (`width`, `height`) and image format (`png`, `jpeg`).
-*   **Containerized & Production-Ready:** Includes a `Dockerfile` for easy, reproducible deployments using a production-grade Gunicorn server.
+## Prerequisites
 
----
+Before you begin, ensure you have the following installed:
 
-## API Documentation
+1.  **Python 3.7+**
+2.  **A Web Browser**: One of the following must be installed on the machine running the API:
+    *   Google Chrome
+    *   Chromium
+    *   Microsoft Edge
+3.  **pip**: Python's package installer.
 
-The service exposes one primary endpoint for all rendering tasks.
+## Installation
 
-### Render HTML to Image
+1.  **Clone the Repository (or save the code)**
+    If you have the project files, navigate into the project directory. If not, save the Python code as `app.py`.
 
-This endpoint accepts a JSON payload containing HTML and rendering options, and returns the generated image directly in the response body.
-
-*   **Endpoint:** `POST /render`
-*   **Headers:**
-    *   `Content-Type: application/json`
-
-#### Request Body
-
-The body of the POST request must be a JSON object with the following fields:
-
-| Field    | Type    | Description                                                                                                        | Required |
-| :------- | :------ | :----------------------------------------------------------------------------------------------------------------- | :------: |
-| `html`   | `string`| The full, raw HTML document to be rendered. This should be a complete document, including `<html>` and `<body>` tags. **It can contain inline CSS and base64 encoded images.** | **Yes**  |
-| `width`  | `integer`| The desired width of the output image in pixels. **Defaults to `1200`**.                                               |    *No*    |
-| `height` | `integer`| The desired height of the output image in pixels. **Defaults to `630`**.                                                |    *No*    |
-| `format` | `string`| The output image format. Can be either `png` or `jpeg`. **Defaults to `png`**.                                           |    *No*    |
-
-**Example JSON Payload:**
-```json
-{
-  "html": "<!DOCTYPE html><html><body style='text-align: center; padding: 4em; background: #eee;'><h1>Hello, Renderer!</h1></body></html>",
-  "width": 800,
-  "height": 400,
-  "format": "jpeg"
-}
-```
-
----
-
-#### Responses
-
-##### ✅ Success Response
-
-On a successful render, the service returns the raw image data directly in the response body.
-
-*   **Status Code:** `200 OK`
-*   **Content-Type:** `image/png` or `image/jpeg` (matches the requested format)
-*   **Body:** The binary data of the generated image.
-
-##### ❌ Error Responses
-
-If the request is invalid or an error occurs during rendering, the service returns a JSON object describing the error.
-
-*   **Status Code:** `400 Bad Request`
-    *   **Reason:** The request payload is malformed or missing a required field.
-    *   **Body:**
-        ```json
-        {
-          "error": "Invalid request: 'html' field is required in the JSON body."
-        }
-        ```
-
-*   **Status Code:** `415 Unsupported Media Type`
-    *   **Reason:** The `Content-Type` header is not set to `application/json`.
-    *   **Body:**
-        ```json
-        {
-          "error": "Invalid request: Content-Type must be application/json."
-        }
-        ```
-*   **Status Code:** `500 Internal Server Error`
-    *   **Reason:** A server-side error occurred, most likely during the Playwright rendering process. Check the service logs for more details.
-    *   **Body:**
-        ```json
-        {
-          "error": "Failed to render HTML. The rendering engine encountered a problem."
-        }
-        ```
-
----
-
-## Usage Example
-
-You can use any HTTP client to interact with the API. Here is an example using `curl` from the command line.
-
-This command sends a request with some simple HTML and saves the resulting image to a file named `my_output_image.png`.
-
-```sh
-curl -X POST http://localhost:8080/render \
--H "Content-Type: application/json" \
--d '{
-  "html": "<!DOCTYPE html><html><body style=\"padding: 3em; background: linear-gradient(to right, #6a11cb, #2575fc); color: white; text-align: center; font-family: sans-serif;\"><h1>Rendered via API!</h1><p style=\"font-size: 20px;\">This service is easy to use.</p></body></html>",
-  "width": 1080,
-  "height": 566,
-  "format": "png"
-}' \
---output my_output_image.png
-```
-
-After running the command, `my_output_image.png` will be saved in your current directory.
-
-## How to Run with Docker
-
-The recommended way to run this service is via Docker.
-
-1.  **Prerequisites**
-    *   Ensure Docker is installed and running on your system.
-
-2.  **Build the Docker Image**
-    Navigate to the project's root directory (where the `Dockerfile` is located) and run:
-    ```sh
-    docker build -t html-to-image-service .
+2.  **Install Dependencies**
+    The application requires `Flask` and `html2image`. You can install them directly using pip:
+    ```bash
+    pip install Flask html2image
     ```
 
-3.  **Run the Docker Container**
-    Start the container and map a local port (e.g., `8080`) to the container's port (`5000`).
-    ```sh
-    docker run -d -p 8080:5000 --name image-renderer html-to-image-service
-    ```
-    The service is now running and accessible at `http://localhost:8080`.
+## Running the Application
+
+To start the API server, run the `app.py` file from your terminal:
+
+```bash
+python app.py
+```
+
+The server will start and listen for requests on `http://127.0.0.1:5001`.
+
+---
+
+## API Endpoints
+
+The API provides two main endpoints for generating images.
+
+### 1. Preview from URL
+
+This endpoint generates a PNG screenshot from a given public URL. The headless browser will wait for the page's primary content to load before taking the screenshot.
+
+*   **Route**: `POST /api/preview-from-url`
+*   **Description**: Renders a PNG image from a web page URL.
+*   **Request Body**: `application/json`
+
+| Parameter | Type    | Required | Default | Description                                 |
+| :-------- | :------ | :------- | :------ | :------------------------------------------ |
+| `url`     | String  | **Yes**  | `null`  | The full URL of the web page to render.     |
+| `width`   | Integer | No       | `1920`  | The width of the browser viewport in pixels. |
+| `height`  | Integer | No       | `1080`  | The height of the browser viewport in pixels.|
+
+#### Success Response
+
+*   **Code**: `200 OK`
+*   **Content-Type**: `image/png`
+*   **Body**: The binary data of the generated PNG image.
+
+#### Error Responses
+
+*   **Code**: `400 Bad Request` - If the request is not JSON or the `url` parameter is missing.
+*   **Code**: `500 Internal Server Error` - If the screenshot process fails (e.g., invalid URL, browser issue).
+
+#### Example `cURL` Request
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://github.com", "width": 1200, "height": 800}' \
+  http://127.0.0.1:5001/api/preview-from-url \
+  --output github-preview.png
+```
+
+This command will create a `github-preview.png` file in your current directory.
+
+### 2. Preview from HTML String
+
+This endpoint generates a PNG image from a raw HTML string. This is useful for rendering dynamic or user-generated content, including HTML with embedded base64 images.
+
+*   **Route**: `POST /api/preview-from-html`
+*   **Description**: Renders a PNG image from an HTML string.
+*   **Request Body**: `application/json`
+
+| Parameter | Type    | Required | Default | Description                                   |
+| :-------- | :------ | :------- | :------ | :-------------------------------------------- |
+| `html`    | String  | **Yes**  | `null`  | The HTML content to be rendered.              |
+| `width`   | Integer | No       | `800`   | The width of the output image in pixels.      |
+| `height`  | Integer | No       | `600`   | The height of the output image in pixels.     |
+
+#### Success Response
+
+*   **Code**: `200 OK`
+*   **Content-Type**: `image/png`
+*   **Body**: The binary data of the generated PNG image.
+
+#### Error Responses
+
+*   **Code**: `400 Bad Request` - If the request is not JSON or the `html` parameter is missing.
+*   **Code**: `500 Internal Server Error` - If the rendering process fails.
+
+#### Example `cURL` Request
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<html><body><h1 style=\"color: #4A90E2;\">Hello, World!</h1><p>Rendered from a string.</p></body></html>", "width": 400, "height": 150}' \
+  http://127.0.0.1:5001/api/preview-from-html \
+  --output html-render.png
+```
+
+This command will create an `html-render.png` file in your current directory.
+
+### Important Notes
+
+*   **Large HTML Payloads**: If you plan to send very large HTML strings (e.g., with multiple large base64 images), you may need to increase Flask's `MAX_CONTENT_LENGTH` configuration in `app.py`.
+*   **Page Load Time**: The underlying browser library (`html2image`) automatically waits for pages to load. For extremely complex, JavaScript-heavy sites, behavior might vary.
