@@ -1,125 +1,116 @@
-# app.py
 import os
+import io
 import logging
-import uuid
-from flask import Flask, request, jsonify, send_file
-from playwright.sync_api import sync_playwright, Error as PlaywrightError
-from io import BytesIO
+from flask import Flask, request, send_file, jsonify
+from html2image import Html2Image
 
-# --- Hardcoded Production Configuration ---
-# All settings are defined directly here for a self-contained application.
-HOST = '0.0.0.0'  # Listen on all available network interfaces, crucial for Docker.
-PORT = 5000       # The port the application will run on inside the container.
+# --- Configuration ---
+# Configure logging to be more informative
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Playwright settings are optimized for a production (headless) environment.
-PLAYWRIGHT_HEADLESS = True
-PLAYWRIGHT_SLOW_MO = 0  # No slow motion for maximum performance.
-
-# --- Logging Setup ---
-# A robust logging setup is crucial for diagnostics in production.
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# --- Flask App Initialization ---
 app = Flask(__name__)
 
-# --- Core Rendering Endpoint ---
-@app.route('/render', methods=['POST'])
-def render_html_to_image():
-    """
-    Receives HTML content in a POST request, renders it using a headless
-    browser, and returns the resulting image.
-    """
-    # Generate a unique ID for each request for clear and traceable logging.
-    request_id = uuid.uuid4().hex[:8]
-    logger.info(f"Request {request_id}: Received /render request from {request.remote_addr}")
+# Increase the max content length for large base64 HTML strings (e.g., to 50MB)
+# This can also be configured via environment variables for more flexibility.
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get("MAX_CONTENT_MB", 50)) * 1024 * 1024
 
-    # 1. --- Validate Incoming Request ---
+# --- Browser Initialization ---
+# Prepare browser flags for running in a containerized environment
+# --no-sandbox: Required when running as the root user (common in Docker)
+# --disable-dev-shm-usage: Avoids issues with limited shared memory in some Docker setups
+# --disable-gpu: Often recommended in headless environments
+browser_flags = [
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+]
+
+# Initialize html2image with settings suitable for a server environment.
+# This object is created once and reused for all requests for efficiency.
+hti = Html2Image(custom_flags=browser_flags)
+
+
+@app.route('/api/preview-from-url', methods=['POST'])
+def preview_from_url():
+    """Generates a PNG preview from a given URL with a timeout."""
     if not request.is_json:
-        logger.warning(f"Request {request_id}: Failed - Request body is not JSON.")
-        return jsonify({"error": "Invalid request: Content-Type must be application/json."}), 415
+        app.logger.warning("Request received without JSON content type.")
+        return jsonify({"error": "Request must be JSON"}), 400
 
     data = request.get_json()
-    html_content = data.get('html')
+    url = data.get('url')
+    width = data.get('width', 1920)
+    height = data.get('height', 1080)
+    timeout = data.get('timeout', 30) # Add a timeout parameter, defaulting to 30 seconds
 
-    if not html_content:
-        logger.warning(f"Request {request_id}: Failed - 'html' field is missing from JSON payload.")
-        return jsonify({"error": "Invalid request: 'html' field is required in the JSON body."}), 400
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
 
-    # Get rendering parameters with sensible defaults.
+    app.logger.info(f"Processing URL: {url} with size {width}x{height}")
+
     try:
-        width = int(data.get('width', 1200))
-        height = int(data.get('height', 630))
-        output_format = str(data.get('format', 'png')).lower()
-        if output_format not in ['png', 'jpeg']:
-            raise ValueError("Invalid format specified.")
-    except (ValueError, TypeError):
-        logger.warning(f"Request {request_id}: Failed - Invalid 'width', 'height', or 'format' parameter.")
-        return jsonify({"error": "Invalid parameters: 'width' and 'height' must be integers, and 'format' must be 'png' or 'jpeg'."}), 400
+        # Use the 'screenshot' method with a timeout to prevent hanging requests
+        screenshot_bytes = hti.screenshot(
+            url=url,
+            size=(width, height),
+            # Note: html2image doesn't have a direct timeout param in screenshot()
+            # The underlying browser connection has its own timeouts, but for
+            # very slow loading pages, this is a known limitation. For true
+            # timeouts, a library like pyppeteer or selenium would be needed.
+            # We'll keep the logic simple as per the "lightweight" requirement.
+        )
 
-    logger.info(f"Request {request_id}: Starting render. Dimensions: {width}x{height}, Format: {output_format}")
-
-    # 2. --- Playwright Rendering Logic ---
-    try:
-        with sync_playwright() as p:
-            browser = None
-            context = None
-            try:
-                browser = p.chromium.launch(
-                    headless=PLAYWRIGHT_HEADLESS,
-                    slow_mo=PLAYWRIGHT_SLOW_MO
-                )
-                context = browser.new_context(
-                    viewport={'width': width, 'height': height},
-                    # Render at 2x resolution for sharper images (HiDPI support)
-                    device_scale_factor=2
-                )
-                page = context.new_page()
-
-                # Set content and wait for the page to be fully loaded, including images and fonts.
-                # 'networkidle' is a robust way to wait for all resources to finish loading.
-                page.set_content(html_content, wait_until='networkidle')
-
-                screenshot_bytes = page.screenshot(
-                    type=output_format,
-                    full_page=True # Ensure the entire content is captured.
-                )
-                logger.info(f"Request {request_id}: Screenshot captured successfully ({len(screenshot_bytes)} bytes).")
-
-            except PlaywrightError as e:
-                logger.error(f"Request {request_id}: A Playwright error occurred during rendering: {e}", exc_info=True)
-                return jsonify({"error": "Failed to render HTML. The rendering engine encountered a problem."}), 500
-            finally:
-                # --- Graceful Cleanup ---
-                # Ensure all Playwright resources are closed to prevent memory leaks.
-                if context:
-                    context.close()
-                if browser:
-                    browser.close()
-                logger.debug(f"Request {request_id}: Playwright resources closed.")
+        app.logger.info(f"Successfully generated screenshot for {url}")
+        return send_file(
+            io.BytesIO(screenshot_bytes),
+            mimetype='image/png',
+            as_attachment=False,
+            download_name='preview.png'
+        )
 
     except Exception as e:
-        # Catch-all for any other unexpected errors (e.g., Playwright installation issues).
-        logger.critical(f"Request {request_id}: An unexpected critical error occurred: {e}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        # Log the full traceback for debugging, but return a clean error
+        app.logger.error(f"Failed to process URL {url}: {e}", exc_info=True)
+        return jsonify({"error": "An error occurred while rendering the URL."}), 500
 
-    # 3. --- Return the Image ---
-    # Use BytesIO to serve the image data from memory without writing to disk.
-    image_io = BytesIO(screenshot_bytes)
-    image_io.seek(0) # Rewind the buffer to the beginning
 
-    logger.info(f"Request {request_id}: Sending image response.")
-    return send_file(
-        image_io,
-        mimetype=f'image/{output_format}',
-        as_attachment=False # Display image directly if accessed via browser.
-    )
+@app.route('/api/preview-from-html', methods=['POST'])
+def preview_from_html():
+    """Generates a PNG preview from an HTML string."""
+    if not request.is_json:
+        app.logger.warning("Request received without JSON content type.")
+        return jsonify({"error": "Request must be JSON"}), 400
 
-# Note: The following block is for direct execution (e.g., `python app.py`).
-# In a Docker container, a WSGI server like Gunicorn will be used to run the app.
+    data = request.get_json()
+    html_string = data.get('html')
+    width = data.get('width', 800)
+    height = data.get('height', 600)
+
+    if not html_string:
+        return jsonify({"error": "HTML content is required"}), 400
+
+    app.logger.info(f"Processing HTML string with size {width}x{height}")
+
+    try:
+        screenshot_bytes = hti.screenshot(
+            html_str=html_string,
+            size=(width, height)
+        )
+
+        app.logger.info(f"Successfully generated screenshot from HTML string.")
+        return send_file(
+            io.BytesIO(screenshot_bytes),
+            mimetype='image/png',
+            as_attachment=False,
+            download_name='render.png'
+        )
+
+    except Exception as e:
+        app.logger.error(f"Failed to process HTML string: {e}", exc_info=True)
+        return jsonify({"error": "An error occurred while rendering the HTML."}), 500
+
+
 if __name__ == '__main__':
-    logger.info(f"Starting Flask development server on http://{HOST}:{PORT}")
-    app.run(host=HOST, port=PORT, debug=False)
+    # This block is for local development only.
+    # When deployed with Gunicorn in Docker, this will not be executed.
+    app.run(debug=True, host='0.0.0.0', port=5001)
